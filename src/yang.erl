@@ -367,7 +367,6 @@ init_ctx(Ctx0, ExtraSearchPath) ->
     SearchPath = ExtraSearchPath ++ search_path(),
     case do_verbose(?V_NORMAL, Ctx0) of
         true ->
-            io:format("YANG module search path:\n"),
             lists:foreach(fun(Dir) ->
                                   io:format("  ~s\n", [Dir])
                           end, SearchPath);
@@ -552,9 +551,11 @@ add_file0(Ctx, FileName, AddCause) ->
     verbose(?V_NORMAL, Ctx, "Read file ~s\n", [FileName]),
     case yang_parser:parse(FileName, Ctx#yctx.canonical) of
         {ok, Stmts, LLErrors} ->
+
             Ctx1 = add_llerrors(LLErrors, Ctx),
             case parse_file_name(FileName) of
                 {ok, FileModuleName, FileRevision} ->
+                    %%zlxytam
                     add_parsed_stmt_tree(Ctx1, Stmts, FileName,
                                          AddCause,
                                          FileModuleName, FileRevision,
@@ -763,6 +764,7 @@ add_parsed_stmt_tree(Ctx00, [{ModKeyword, ModuleName, Pos, Substmts} = Stmt],
                     %% already added, just return the module
                     {true, Ctx1, M};
                 none ->
+                    %%zlyxtam1
                     ModRevs = map_insert({ModuleName, ModuleRevision},
                                          processing, Ctx1#yctx.modrevs),
                     Revs0 = Ctx1#yctx.revs,
@@ -777,6 +779,7 @@ add_parsed_stmt_tree(Ctx00, [{ModKeyword, ModuleName, Pos, Substmts} = Stmt],
                                     map_insert(ModuleName, [ModuleRevision],
                                               Revs0)
                             end,
+                            %%%zlyxtam2
                     Ctx2 = Ctx1#yctx{modrevs = ModRevs, revs = Revs1},
                     {Ctx3, [Stmt1]} =
                         run_hooks(#hooks.post_parse_stmt_tree, Ctx2, [Stmt]),
@@ -797,8 +800,10 @@ add_parsed_stmt_tree(Ctx00, [{ModKeyword, ModuleName, Pos, Substmts} = Stmt],
                                  revision = ModuleRevision,
                                  modulerevision = IncludingModuleRevision1,
                                  add_cause = AddCause},
+                                 %%%zlyxtam
                     {Ctx4, M1} = parse_module(Stmt1, M0, Ctx3),
                     {Ctx5, M2} = post_parse_module(Ctx4, M1),
+                    %%zlyxtam3
                     ModRevs2 = map_update({ModuleName, ModuleRevision}, M2,
                                           Ctx5#yctx.modrevs),
                     Ctx6 = Ctx5#yctx{modrevs = ModRevs2},
@@ -1129,6 +1134,7 @@ parse_body(Stmts, M0, Ctx0) ->
          end,
     %% Update the module in the context before applying remote deviations,
     %% to allow the deviations to reference definitions from this module
+%%%zlxytam4
     ModRevs = map_update({M6#module.name, M6#module.revision}, M6,
                           Ctx15#yctx.modrevs),
     Ctx16 = Ctx15#yctx{modrevs = ModRevs},
@@ -1258,6 +1264,7 @@ apply_remote_augments([{TargetModuleName, Augments0} | T], M, Ctx0, Acc) ->
 apply_remote_augments([], _M, Ctx, Acc) ->
     {Ctx, Acc}.
 
+%%%zlxytam123
 set_module_name_and_config(Ctx,
                            [#sn{name = Name, children = Children} = Sn0 | T],
                            ModuleName, Ancestors) ->
@@ -2073,6 +2080,7 @@ get_children_from_submodules(M) ->
                 end, Acc, SubM#module.children)
       end, [], M#module.submodules).
 
+%%%zlyxtam123
 mk_grouping_children(Stmts, GroupingMap, ParentTypedefs, ParentGroupings,
                      M, Ctx0) ->
     {Typedefs, Groupings, Ctx1} =
@@ -2108,6 +2116,7 @@ mk_children([{Kwd, Arg, Pos, Substmts} = Stmt | T], GroupingMap0,
                             %% find it again (the properly added grouping)
                             case map_lookup(GroupingName, GroupingMap1) of
                                 {value, G1} ->
+
                                     Status = get_stmts_arg(Substmts, 'status',
                                                            'current'),
                                     Ctx3 = chk_status(Status,
@@ -2369,7 +2378,7 @@ augment_children(Augments, Children, UndefAugNodes, Mode, Ancestors, M, Ctx0) ->
 report_undef_augment_nodes(UndefAugNodes, Ctx) ->
     lists:foldl(
       fun({Pos, Id}, Ctx1) ->
-              add_error(Ctx1, Pos, 'YANG_ERR_NODE_NOT_FOUND',
+          add_error(Ctx1, Pos, 'YANG_ERR_NODE_NOT_FOUND',
                         [yang_error:fmt_yang_identifier(Id)])
       end, Ctx, UndefAugNodes).
 
@@ -2384,14 +2393,24 @@ augment_children0([], Sns, _Acc = [], Mode,
     insert_children(Augment#augment.children, Sns, IsFinal, Ancestors,
                     UndefAugNodes, append, Ctx);
 augment_children0([{child, Id} | Ids],
-                  [#sn{name = Name, children = Children} = Sn | Sns],
+                  [#sn{name = Name, children = Children, module = #module{groupings = Groupingss, modulename = ModuleName},
+                  augmented_by = AugmentBy} = Sn | Sns],
                   Acc, Mode, Ancestors, Augment,
                   UndefAugNodes, M, Ctx)
   when Id == Name ->
     %% We found a node in the augment path; we must update it
     %% with new children.
+
+    Result = find_sn_from_augment(Children, AugmentBy, Groupingss, Ids, ModuleName),
+    NewChildren = case Result =:= not_found of
+                      true -> 
+                          Children;
+                      _ ->
+                          Result
+                  end,
+
     {AugmentedChildren, UndefAugNodes1, Ctx1} =
-        augment_children0(Ids, Children, [], Mode,
+        augment_children0(Ids, NewChildren, [], Mode,
                           [Sn | Ancestors], Augment, UndefAugNodes, M, Ctx),
     Sn1 = mk_case_from_shorthand(Sn#sn{children = AugmentedChildren}),
     Sn2 = if Ids == [] ->
@@ -2413,15 +2432,16 @@ augment_children0([{child, Id} | Ids], [], Acc, Mode, _Ancestors, Augment,
     UndefAugNodes1 = [{AugPos, Id} | UndefAugNodes],
     {AugmentedChildren, UndefAugNodes2, Ctx1} =
         augment_children0(Ids, [], [], Mode, [],
-                          Augment, UndefAugNodes1, M, Ctx0),
+                        Augment, UndefAugNodes1, M, Ctx0),
+
     {lists:reverse(Acc, [#sn{name = Id,
-                             module = M,
-                             kind = '__tmp_augment__',
-                             stmt = {'__tmp_augment__', undefined, AugPos, []},
-                             augmented_by = [Augment],
-                             children = AugmentedChildren}]),
-     UndefAugNodes2,
-     Ctx1}.
+                            module = M,
+                            kind = '__tmp_augment__',
+                            stmt = {'__tmp_augment__', undefined, AugPos, []},
+                            augmented_by = [Augment],
+                            children = AugmentedChildren}]),
+    UndefAugNodes2,
+    Ctx1}.
 
 %% Add NewSns after/before all ExistsingSns, but if a __tmp_augment__ is
 %% found, we need to copy our children before the __tmp_augment__'s
@@ -3465,8 +3485,8 @@ mk_choice_children_from_shorthand(M, Children, Config, Groupings, Typedefs) ->
     lists:map(
       fun(#sn{kind = 'case'} = Sn) ->
               Sn;
-         (#sn{name = Name, stmt = {_Keyword, Arg, Pos, _} = Stmt} = Sn) ->
-              %% shorthand, add case
+            %% shorthand, add case
+            (#sn{name = Name, stmt = {_Keyword, Arg, Pos, _} = Stmt} = Sn) ->
               #sn{name = Name, kind = 'case', children = [Sn],
                   module = M,
                   config = Config,
@@ -3698,6 +3718,7 @@ deviation_update_modules(_DeviatedModules = [_ | Rest],
     %% modules must then have their deviated_by set and stored in Ctx modrevs.
     TargetM = TargetM0#module{ignored = Ignored, children = DeviatedChildren},
     DeviatedBy = [{DeviatingM#module.modulename, DeviatingM#module.revision}],
+    %%zlyxtam5
     ModRevs = update_modrevs([TargetM | Rest], DeviatedBy, Ctx#yctx.modrevs),
     Ctx#yctx{modrevs = ModRevs}.
 
@@ -5055,6 +5076,7 @@ cursor_move({child, {Mod, Name} = Id}, C, Ctx) ->
             {true, C#cursor{cur = Sn, ancestors = [],
                             last_skipped = undefined}};
         false ->
+            
             {false, build_error(Ctx, C#cursor.pos,
                                 'YANG_ERR_NODE_NOT_FOUND2',
                                 [yang_error:fmt_yang_identifier(Name), Mod])}
@@ -5580,3 +5602,49 @@ pp_default(Default, Indent) ->
 %    pp_children(T, Indent);
 %pp_children([], _Indent) ->
 %    ok.
+
+%% @doc find the childrend when it belongs to augment.
+find_sn_from_augment([#sn{children = []}],
+                     [#augment{stmt = {_Keyword, _Arg, _Pos, Substmts}}],
+                     Groupingss, [{child, {_, Name}} | _Ids], ModuleName) ->
+%find_sn_from_augment([], [#augment{stmt =  {_Keyword, _Arg, _Pos, Substmts}}], Groupingss, [{child, {_, Name}} | Ids], ModuleName) ->
+    Grouping = grouping_lookup(Substmts, Groupingss, Name),
+    case Grouping =:= not_found of
+        true ->
+            not_found;
+        _ ->
+            #grouping{children = Children} = Grouping,
+            set_module_name(Children, ModuleName)
+    end;
+find_sn_from_augment(_, _, _, _, _) ->
+    not_found.
+
+%% @doc Lookup the group when augment contains multiple groups
+grouping_lookup([{_, GroupingName, _, _} | T], Groupings, Name) ->
+    case grouping_lookup(GroupingName, Groupings) of
+        {value, GroupValue} ->
+            get_child_from_group(GroupValue, Groupings, Name, T);
+        none ->
+            not_found
+    end;
+grouping_lookup(_, _, _) ->
+    not_found.
+
+%% @doc Get child from group when compare child's name with remaining target
+%%node from augment
+get_child_from_group(#grouping{children = [#sn{name = Name}]} = Group,
+                     _, Name, _) ->
+    Group;
+get_child_from_group(_ , _, _, []) ->
+    not_found;
+get_child_from_group(_, Groupingss, Name, T) ->
+    grouping_lookup(T, Groupingss, Name).
+
+set_module_name([#sn{name = Name, children = Children} = Sn0 | T],
+                ModuleName) ->
+    io:format("tdbg_~p/~p/~p/___Name_~p__\n", [?MODULE, ?FUNCTION_NAME, ?LINE, Name]),
+    [Sn0#sn{name = {ModuleName, Name},
+            children = set_module_name(Children, ModuleName)} |
+     set_module_name(T, ModuleName)];
+set_module_name([], _) ->
+    [].
