@@ -367,7 +367,6 @@ init_ctx(Ctx0, ExtraSearchPath) ->
     SearchPath = ExtraSearchPath ++ search_path(),
     case do_verbose(?V_NORMAL, Ctx0) of
         true ->
-            io:format("YANG module search path:\n"),
             lists:foreach(fun(Dir) ->
                                   io:format("  ~s\n", [Dir])
                           end, SearchPath);
@@ -552,9 +551,11 @@ add_file0(Ctx, FileName, AddCause) ->
     verbose(?V_NORMAL, Ctx, "Read file ~s\n", [FileName]),
     case yang_parser:parse(FileName, Ctx#yctx.canonical) of
         {ok, Stmts, LLErrors} ->
+
             Ctx1 = add_llerrors(LLErrors, Ctx),
             case parse_file_name(FileName) of
                 {ok, FileModuleName, FileRevision} ->
+                    %%zlxytam
                     add_parsed_stmt_tree(Ctx1, Stmts, FileName,
                                          AddCause,
                                          FileModuleName, FileRevision,
@@ -763,6 +764,7 @@ add_parsed_stmt_tree(Ctx00, [{ModKeyword, ModuleName, Pos, Substmts} = Stmt],
                     %% already added, just return the module
                     {true, Ctx1, M};
                 none ->
+                    %%zlyxtam1
                     ModRevs = map_insert({ModuleName, ModuleRevision},
                                          processing, Ctx1#yctx.modrevs),
                     Revs0 = Ctx1#yctx.revs,
@@ -798,8 +800,10 @@ add_parsed_stmt_tree(Ctx00, [{ModKeyword, ModuleName, Pos, Substmts} = Stmt],
                                  revision = ModuleRevision,
                                  modulerevision = IncludingModuleRevision1,
                                  add_cause = AddCause},
+                                 %%%zlyxtam
                     {Ctx4, M1} = parse_module(Stmt1, M0, Ctx3),
                     {Ctx5, M2} = post_parse_module(Ctx4, M1),
+                    %%zlyxtam3
                     ModRevs2 = map_update({ModuleName, ModuleRevision}, M2,
                                           Ctx5#yctx.modrevs),
                     Ctx6 = Ctx5#yctx{modrevs = ModRevs2},
@@ -1130,6 +1134,7 @@ parse_body(Stmts, M0, Ctx0) ->
          end,
     %% Update the module in the context before applying remote deviations,
     %% to allow the deviations to reference definitions from this module
+%%%zlxytam4
     ModRevs = map_update({M6#module.name, M6#module.revision}, M6,
                           Ctx15#yctx.modrevs),
     Ctx16 = Ctx15#yctx{modrevs = ModRevs},
@@ -1259,6 +1264,7 @@ apply_remote_augments([{TargetModuleName, Augments0} | T], M, Ctx0, Acc) ->
 apply_remote_augments([], _M, Ctx, Acc) ->
     {Ctx, Acc}.
 
+%%%zlxytam123
 set_module_name_and_config(Ctx,
                            [#sn{name = Name, children = Children} = Sn0 | T],
                            ModuleName, Ancestors) ->
@@ -2074,6 +2080,7 @@ get_children_from_submodules(M) ->
                 end, Acc, SubM#module.children)
       end, [], M#module.submodules).
 
+%%%zlyxtam123
 mk_grouping_children(Stmts, GroupingMap, ParentTypedefs, ParentGroupings,
                      M, Ctx0) ->
     {Typedefs, Groupings, Ctx1} =
@@ -2109,6 +2116,7 @@ mk_children([{Kwd, Arg, Pos, Substmts} = Stmt | T], GroupingMap0,
                             %% find it again (the properly added grouping)
                             case map_lookup(GroupingName, GroupingMap1) of
                                 {value, G1} ->
+
                                     Status = get_stmts_arg(Substmts, 'status',
                                                            'current'),
                                     Ctx3 = chk_status(Status,
@@ -2370,7 +2378,7 @@ augment_children(Augments, Children, UndefAugNodes, Mode, Ancestors, M, Ctx0) ->
 report_undef_augment_nodes(UndefAugNodes, Ctx) ->
     lists:foldl(
       fun({Pos, Id}, Ctx1) ->
-              add_error(Ctx1, Pos, 'YANG_ERR_NODE_NOT_FOUND',
+          add_error(Ctx1, Pos, 'YANG_ERR_NODE_NOT_FOUND',
                         [yang_error:fmt_yang_identifier(Id)])
       end, Ctx, UndefAugNodes).
 
@@ -2425,7 +2433,6 @@ augment_children0([{child, Id} | Ids], [], Acc, Mode, _Ancestors, Augment,
     {AugmentedChildren, UndefAugNodes2, Ctx1} =
         augment_children0(Ids, [], [], Mode, [],
                           Augment, UndefAugNodes1, M, Ctx0),
-
     {lists:reverse(Acc, [#sn{name = Id,
                              module = M,
                              kind = '__tmp_augment__',
@@ -3477,8 +3484,8 @@ mk_choice_children_from_shorthand(M, Children, Config, Groupings, Typedefs) ->
     lists:map(
       fun(#sn{kind = 'case'} = Sn) ->
               Sn;
-         (#sn{name = Name, stmt = {_Keyword, Arg, Pos, _} = Stmt} = Sn) ->
-              %% shorthand, add case
+            %% shorthand, add case
+            (#sn{name = Name, stmt = {_Keyword, Arg, Pos, _} = Stmt} = Sn) ->
               #sn{name = Name, kind = 'case', children = [Sn],
                   module = M,
                   config = Config,
@@ -3710,6 +3717,7 @@ deviation_update_modules(_DeviatedModules = [_ | Rest],
     %% modules must then have their deviated_by set and stored in Ctx modrevs.
     TargetM = TargetM0#module{ignored = Ignored, children = DeviatedChildren},
     DeviatedBy = [{DeviatingM#module.modulename, DeviatingM#module.revision}],
+    %%zlyxtam5
     ModRevs = update_modrevs([TargetM | Rest], DeviatedBy, Ctx#yctx.modrevs),
     Ctx#yctx{modrevs = ModRevs}.
 
@@ -5067,6 +5075,7 @@ cursor_move({child, {Mod, Name} = Id}, C, Ctx) ->
             {true, C#cursor{cur = Sn, ancestors = [],
                             last_skipped = undefined}};
         false ->
+            
             {false, build_error(Ctx, C#cursor.pos,
                                 'YANG_ERR_NODE_NOT_FOUND2',
                                 [yang_error:fmt_yang_identifier(Name), Mod])}
